@@ -1,0 +1,56 @@
+# In your VS Code or Spyder _Terminal_ ( PowerShell / cmd ), with your venv active:
+pip install pandas
+pip install langchain
+pip install chromadb
+pip install sentence-transformers
+pip install langchain-huggingface
+
+
+import os
+import pandas as pd
+import streamlit as st
+
+from langchain.document_loaders import CSVLoader
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Chroma
+from langchain.chains import RetrievalQA
+from langchain_huggingface import HuggingFacePipeline
+
+# 1. Load CSV
+
+loader = CSVLoader(file_path="C:/Users/Sibahle Hashe/Documents/Projects/Spyder/ChatBotDatabase/employee_data.csv", encoding="utf-8")
+documents = loader.load()
+
+# 2. Create vector store from documents
+hf_embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+vector_store = Chroma.from_documents(documents, hf_embeddings)
+retriever = vector_store.as_retriever()
+
+# 3. Load LLM
+llm = HuggingFacePipeline.from_model_id(
+    model_id="google/flan-t5-large",
+    task="text2text-generation",
+    pipeline_kwargs={"max_new_tokens": 128}
+)
+
+# 4. Setup QA chain
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    chain_type="map_reduce",
+    retriever=retriever,
+    return_source_documents=False,
+)
+
+# 5. Streamlit UI
+st.title("📊 Employee Chatbot")
+st.write("Ask any question about the employee dataset:")
+
+user_question = st.text_input("Your question")
+
+if user_question:
+    with st.spinner("Thinking..."):
+        response = qa_chain.run(user_question)
+    st.success(response)
+
+import sys
+print(sys.executable)
