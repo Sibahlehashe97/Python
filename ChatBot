@@ -1,30 +1,41 @@
-# In your VS Code or Spyder _Terminal_ ( PowerShell / cmd ), with your venv active:
-pip install pandas
-pip install langchain
-pip install chromadb
-pip install sentence-transformers
-pip install langchain-huggingface
-
-
 import os
 import pandas as pd
 import streamlit as st
-
+ 
 from langchain.document_loaders import CSVLoader
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain_huggingface import HuggingFacePipeline
 
+# Add these at the top with other imports
+from langchain.retrievers import BM25Retriever, EnsembleRetriever
+from langchain.text_splitter import RecursiveCharacterTextSplitter 
 # 1. Load CSV
 
 loader = CSVLoader(file_path="C:/Users/Sibahle Hashe/Documents/Projects/Spyder/ChatBotDatabase/employee_data.csv", encoding="utf-8")
 documents = loader.load()
 
-# 2. Create vector store from documents
+# 2. Split documents into chunks
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+split_documents = text_splitter.split_documents(documents)
+
+# 3. Create retrievers
+# BM25 (keyword-based)
+bm25_retriever = BM25Retriever.from_documents(split_documents)
+bm25_retriever.k = 3
+
+# Vector Store (semantic)
 hf_embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-vector_store = Chroma.from_documents(documents, hf_embeddings)
-retriever = vector_store.as_retriever()
+vector_store = Chroma.from_documents(split_documents, hf_embeddings)
+vector_retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+
+# Hybrid retriever
+ensemble_retriever = EnsembleRetriever(
+    retrievers=[vector_retriever, bm25_retriever],
+    weights=[0.6, 0.4]
+)
+ 
 
 # 3. Load LLM
 llm = HuggingFacePipeline.from_model_id(
@@ -32,25 +43,25 @@ llm = HuggingFacePipeline.from_model_id(
     task="text2text-generation",
     pipeline_kwargs={"max_new_tokens": 128}
 )
-
+ 
 # 4. Setup QA chain
 qa_chain = RetrievalQA.from_chain_type(
     llm=llm,
-    chain_type="map_reduce",
-    retriever=retriever,
+    chain_type="stuff",  # Better for small contexts
+    retriever=ensemble_retriever,  # Use our combined retriever
     return_source_documents=False,
 )
-
+ 
 # 5. Streamlit UI
 st.title("📊 Employee Chatbot")
 st.write("Ask any question about the employee dataset:")
-
+ 
 user_question = st.text_input("Your question")
-
+ 
 if user_question:
     with st.spinner("Thinking..."):
         response = qa_chain.run(user_question)
     st.success(response)
-
+ 
 import sys
 print(sys.executable)
